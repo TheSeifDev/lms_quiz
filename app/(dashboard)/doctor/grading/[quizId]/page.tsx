@@ -93,7 +93,11 @@ export default function GradingPage({ params }: PageProps) {
 
       if (error) throw error;
 
+
       toast.success('Grade saved successfully!');
+
+      // Refresh dashboard data
+      router.refresh();
 
       // Update local state
       const updatedSubmissions = [...submissions];

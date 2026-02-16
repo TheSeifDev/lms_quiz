@@ -85,7 +85,8 @@ export default function CreateQuizPage() {
 
       toast.success(`Quiz created successfully! Code: ${quizCode}`);
 
-      // Redirect to grading page for the new quiz
+      // Refresh dashboard data and redirect to grading page
+      router.refresh();
       setTimeout(() => {
         router.push(`/doctor/grading/${data.id}`);
       }, 1000);

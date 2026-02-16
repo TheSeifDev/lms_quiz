@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import type { Quiz } from "@/types";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDisableInspect } from "@/hooks/useDisableInspect";
 
 interface PageProps {
   params: Promise<{ quizId: string }>;
@@ -17,6 +18,10 @@ interface PageProps {
 export default function QuizUploadPage({ params }: PageProps) {
   // Unwrap async params for Next.js 16
   const { quizId } = use(params);
+
+  // Disable browser inspection tools to prevent cheating
+  useDisableInspect();
+
   const { profile } = useAuth();
   const router = useRouter();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
@@ -136,8 +141,12 @@ export default function QuizUploadPage({ params }: PageProps) {
         throw insertError;
       }
 
+
       console.log('Submission created:', insertData);
       toast.success('Quiz submitted successfully!');
+
+      // Refresh dashboard data
+      router.refresh();
 
       // Redirect to dashboard after 1 second
       setTimeout(() => {

@@ -67,67 +67,116 @@ export default function DashboardPortal() {
   const fetchStudentData = async () => {
     if (!activeProfile) return;
 
-    // Fetch recent submissions
-    const { data: submissions } = await supabase
-      .from('submissions')
-      .select('*, quizzes:quiz_id(title)')
-      .eq('student_id', activeProfile.id)
-      .order('created_at', { ascending: false })
-      .limit(3);
+    try {
+      // Fetch total submissions count
+      const { data: allSubmissions, error: submissionsError } = await supabase
+        .from('submissions')
+        .select('id, status, grade, created_at, quizzes:quiz_id(title)')
+        .eq('student_id', activeProfile.id);
 
-    setRecentActivity(submissions || []);
+      if (submissionsError) throw submissionsError;
 
-    // Fetch upcoming quiz
-    const { data: quizzes } = await supabase
-      .from('quizzes')
-      .select('*')
-      .gte('start_time', new Date().toISOString())
-      .order('start_time', { ascending: true })
-      .limit(1);
+      // Calculate stats
+      const totalSubmissions = allSubmissions?.length || 0;
+      const pendingSubmissions = allSubmissions?.filter((s: any) => s.status === 'pending').length || 0;
+      const gradedSubmissions = allSubmissions?.filter((s: any) => s.status === 'graded').length || 0;
+      const averageGrade = gradedSubmissions > 0
+        ? (allSubmissions?.filter((s: any) => s.status === 'graded')
+          .reduce((sum: number, s: any) => sum + (s.grade || 0), 0) / gradedSubmissions).toFixed(1)
+        : '0';
 
-    setUpcomingQuiz(quizzes?.[0] || null);
+      setStatsData({
+        totalSubmissions,
+        pendingSubmissions,
+        gradedSubmissions,
+        averageGrade
+      });
+
+      // Recent submissions (last 3)
+      const recentSubmissions = allSubmissions
+        ?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 3) || [];
+
+      setRecentActivity(recentSubmissions);
+
+      // Fetch upcoming quiz
+      const { data: quizzes } = await supabase
+        .from('quizzes')
+        .select('*')
+        .gte('start_time', new Date().toISOString())
+        .order('start_time', { ascending: true })
+        .limit(1);
+
+      setUpcomingQuiz(quizzes?.[0] || null);
+    } catch (error) {
+      console.error('Error fetching student data:', error);
+      toast.error('Failed to load dashboard data');
+    }
   };
 
   const fetchDoctorData = async () => {
     if (!activeProfile) return;
 
-    // Fetch doctor's active quizzes
-    const { data: quizzes } = await supabase
-      .from('quizzes')
-      .select('*, submissions(count)')
-      .eq('instructor_id', activeProfile.id)
-      .order('created_at', { ascending: false })
-      .limit(3);
+    try {
+      // Fetch all quizzes by this doctor
+      const { data: quizzes, error: quizzesError } = await supabase
+        .from('quizzes')
+        .select('id, title, code, created_at, start_time')
+        .eq('instructor_id', activeProfile.id)
+        .order('created_at', { ascending: false });
 
-    setRecentActivity(quizzes || []);
+      if (quizzesError) throw quizzesError;
 
-    // Fetch quiz with most ungraded submissions
-    const { data: ungradedStats } = await supabase
-      .from('submissions')
-      .select('quiz_id, quizzes(*, instructor_id)')
-      .eq('status', 'pending')
-      .eq('quizzes.instructor_id', activeProfile.id);
+      const totalQuizzes = quizzes?.length || 0;
 
-    if (ungradedStats && ungradedStats.length > 0) {
-      // Find quiz with most pending submissions
-      const quizCounts: Record<string, number> = {};
-      ungradedStats.forEach((sub: any) => {
-        if (sub.quiz_id) {
-          quizCounts[sub.quiz_id] = (quizCounts[sub.quiz_id] || 0) + 1;
-        }
+      // Fetch all submissions for doctor's quizzes
+      const { data: allSubmissions, error: submissionsError } = await supabase
+        .from('submissions')
+        .select('*, quizzes!inner(instructor_id)')
+        .eq('quizzes.instructor_id', activeProfile.id);
+
+      if (submissionsError) throw submissionsError;
+
+      const totalSubmissions = allSubmissions?.length || 0;
+      const pendingSubmissions = allSubmissions?.filter((s: any) => s.status === 'pending').length || 0;
+      const gradedSubmissions = allSubmissions?.filter((s: any) => s.status === 'graded').length || 0;
+
+      setStatsData({
+        totalQuizzes,
+        totalSubmissions,
+        pendingSubmissions,
+        gradedSubmissions
       });
 
-      const topQuizId = Object.keys(quizCounts).sort((a, b) => quizCounts[b] - quizCounts[a])[0];
-      if (topQuizId) {
-        const { data: quiz } = await supabase
-          .from('quizzes')
-          .select('*')
-          .eq('id', topQuizId)
-          .single();
+      // Recent quizzes (last 3)
+      setRecentActivity(quizzes?.slice(0, 3) || []);
 
-        setUpcomingQuiz(quiz);
-        setStatsData({ ungradedCount: quizCounts[topQuizId] });
+      // Find quiz with most ungraded submissions
+      if (pendingSubmissions > 0 && allSubmissions) {
+        const quizCounts: Record<string, number> = {};
+        allSubmissions
+          .filter((s: any) => s.status === 'pending')
+          .forEach((sub: any) => {
+            if (sub.quiz_id) {
+              quizCounts[sub.quiz_id] = (quizCounts[sub.quiz_id] || 0) + 1;
+            }
+          });
+
+
+        const topQuizId = Object.keys(quizCounts).sort((a, b) => quizCounts[b] - quizCounts[a])[0];
+        if (topQuizId) {
+          const quiz: any = quizzes?.find((q: any) => q.id === topQuizId);
+          if (quiz) {
+            setUpcomingQuiz({ ...quiz, ungradedCount: quizCounts[topQuizId] } as any);
+          }
+        }
+      } else if (quizzes && quizzes.length > 0) {
+        // Show most recent quiz if no pending submissions
+        setUpcomingQuiz(quizzes[0]);
       }
+    } catch (error) {
+      console.error('Error fetching doctor data:', error);
+      toast.error('Failed to load dashboard data');
     }
   };
 
